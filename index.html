@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>股票走势模拟</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    #controls {
+      margin-bottom: 20px;
+    }
+    #chart {
+      width: 100%;
+      max-width: 800px;
+      height: 500px;
+    }
+  </style>
+</head>
+<body>
+  <h1>股票走势模拟</h1>
+  <div id="controls">
+    <label for="mode-select">选择股价走势模式：</label>
+    <select id="mode-select">
+      <option value="1">均线震荡</option>
+      <option value="2">剧烈震荡</option>
+      <option value="3">主升浪</option>
+      <option value="4">混合模式</option>
+    </select>
+    <button id="reset-btn">重置模拟</button>
+  </div>
+  <div id="chart"></div>
+  
+  <script>
+    // 初始化数据
+    let prices = [100];
+    let xData = [0];
+    let mode = parseInt(document.getElementById("mode-select").value);
+    
+    // 根据模式生成下一天价格
+    function simulateNextPrice(lastPrice, mode) {
+      let dailyReturn = 0;
+      if (mode === 1) {
+        // 均线震荡：波动较小
+        dailyReturn = Math.random() * 0.06 - 0.03; // -3% ~ +3%
+      } else if (mode === 2) {
+        // 剧烈震荡：波动较大
+        dailyReturn = Math.random() * 0.2 - 0.1;   // -10% ~ +10%
+      } else if (mode === 3) {
+        // 主升浪：整体正向趋势
+        dailyReturn = 0.02 + (Math.random() * 0.06 - 0.03); // 约 +2% 再加随机波动
+      } else if (mode === 4) {
+        // 混合模式：随机选择上述三种之一（概率分别为 0.3, 0.3, 0.4）
+        let rnd = Math.random();
+        if (rnd < 0.3) {
+          dailyReturn = Math.random() * 0.06 - 0.03;
+        } else if (rnd < 0.6) {
+          dailyReturn = Math.random() * 0.2 - 0.1;
+        } else {
+          dailyReturn = 0.02 + (Math.random() * 0.06 - 0.03);
+        }
+      }
+      // 限制每日涨跌幅不超过 ±10%
+      dailyReturn = Math.max(Math.min(dailyReturn, 0.1), -0.1);
+      return lastPrice * (1 + dailyReturn);
+    }
+    
+    // 计算简单移动平均 MA
+    function computeMA(data, window) {
+      let ma = [];
+      for (let i = 0; i < data.length; i++) {
+        if (i < window - 1) {
+          ma.push(null);
+        } else {
+          let sum = 0;
+          for (let j = i - window + 1; j <= i; j++) {
+            sum += data[j];
+          }
+          ma.push(sum / window);
+        }
+      }
+      return ma;
+    }
+    
+    // 计算指数移动平均 EMA
+    function computeEMA(data, span) {
+      let ema = [];
+      let k = 2 / (span + 1);
+      for (let i = 0; i < data.length; i++) {
+        if (i === 0) {
+          ema.push(data[0]);
+        } else {
+          ema.push(data[i] * k + ema[i - 1] * (1 - k));
+        }
+      }
+      return ema;
+    }
+    
+    // 初始化图表
+    let layout = {
+      title: '股票走势模拟',
+      xaxis: {title: '时间（日）'},
+      yaxis: {title: '价格'}
+    };
+    
+    function drawChart() {
+      let ma13 = computeMA(prices, 13);
+      let ma21 = computeMA(prices, 21);
+      let ema40 = computeEMA(prices, 40);
+      let ema60 = computeEMA(prices, 60);
+      
+      let data = [
+        {x: xData, y: prices, mode: 'lines', name: '股价'},
+        {x: xData, y: ma13, mode: 'lines', name: 'MA13'},
+        {x: xData, y: ma21, mode: 'lines', name: 'MA21'},
+        {x: xData, y: ema40, mode: 'lines', name: 'EMA40'},
+        {x: xData, y: ema60, mode: 'lines', name: 'EMA60'}
+      ];
+      Plotly.react('chart', data, layout);
+    }
+    
+    // 初次绘制图表
+    drawChart();
+    
+    // 每秒钟更新一次数据
+    setInterval(function() {
+      mode = parseInt(document.getElementById("mode-select").value);
+      let lastPrice = prices[prices.length - 1];
+      let newPrice = simulateNextPrice(lastPrice, mode);
+      prices.push(newPrice);
+      xData.push(xData.length);
+      drawChart();
+    }, 1000);
+    
+    // 重置模拟按钮事件
+    document.getElementById("reset-btn").addEventListener("click", function() {
+      prices = [100];
+      xData = [0];
+      drawChart();
+    });
+  </script>
+</body>
+</html>
