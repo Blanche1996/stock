@@ -8,6 +8,8 @@
     body {
       font-family: Arial, sans-serif;
       margin: 20px;
+      background-color: #111111;
+      color: white;
     }
     #controls {
       margin-bottom: 20px;
@@ -18,6 +20,9 @@
     }
     .checkbox-group {
       margin-top: 10px;
+    }
+    select, button {
+      font-size: 16px;
     }
   </style>
 </head>
@@ -43,11 +48,11 @@
   <div id="chart"></div>
   
   <script>
-    // 初始化数据：第一天的K线数据，开盘、最高、最低、收盘均为100
+    // 初始数据：第一天K线数据，开盘、最高、最低、收盘均为100
     let candles = [{ open: 100, high: 100, low: 100, close: 100 }];
     let xData = [0];
 
-    // 根据模式生成下一天的K线数据（candlestick）
+    // 根据模式生成下一天的K线数据
     function simulateNextCandle(lastClose, mode) {
       let dailyReturn = 0;
       if (mode === 1) { // 均线震荡：波动较小
@@ -70,7 +75,7 @@
       dailyReturn = Math.max(Math.min(dailyReturn, 0.1), -0.1);
       let open = lastClose;
       let close = open * (1 + dailyReturn);
-      // 模拟上影线与下影线：在最高价与最低价上随机增加或减少最多2%
+      // 模拟上影线和下影线：在最高价和最低价上加减最多2%
       let high = Math.max(open, close) * (1 + Math.random() * 0.02);
       let low = Math.min(open, close) * (1 - Math.random() * 0.02);
       return { open: open, high: high, low: low, close: close };
@@ -122,7 +127,7 @@
       let showEMA40 = document.getElementById("ema40").checked;
       let showEMA60 = document.getElementById("ema60").checked;
 
-      // 构建图表数据
+      // 构造K线图数据（candlestick）
       let candlestick = {
           x: xData,
           open: candles.map(c => c.open),
@@ -130,7 +135,9 @@
           low: candles.map(c => c.low),
           close: candles.map(c => c.close),
           type: 'candlestick',
-          name: 'K线'
+          name: 'K线',
+          increasing: { line: { color: 'red' } },  // 上涨：红色
+          decreasing: { line: { color: 'green' } }  // 下跌：绿色
       };
 
       let traces = [candlestick];
@@ -177,16 +184,19 @@
         xaxis: { title: '时间（日）' },
         yaxis: { title: '价格' },
         width: 1000,
-        height: 600
+        height: 600,
+        paper_bgcolor: '#111111',
+        plot_bgcolor: '#111111',
+        font: { color: 'white' }
       };
 
       Plotly.react('chart', traces, layout);
     }
 
-    // 初次绘制
+    // 初次绘制图表
     drawChart();
 
-    // 每秒钟更新一次，模拟生成新一天的K线数据
+    // 每秒钟更新一次数据，模拟生成新一天的K线数据
     setInterval(function() {
       let mode = parseInt(document.getElementById("mode-select").value);
       let lastCandle = candles[candles.length - 1];
