@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8">
-  <title>股票走势模拟 (K线模式)</title>
+  <title>股票走势模拟（多级别K线+交互交易）</title>
   <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
   <style>
     body {
@@ -12,22 +12,37 @@
       color: white;
     }
     #controls {
-      margin-bottom: 20px;
+      margin-bottom: 10px;
     }
-    #chart {
-      width: 1000px;
-      height: 600px;
+    #charts {
+      margin-top: 20px;
     }
-    .checkbox-group {
+    /* 三个图表并排，各自占 33% 宽度 */
+    .chart-container {
+      display: inline-block;
+      vertical-align: top;
+      width: 32%;
+    }
+    #funds-display {
       margin-top: 10px;
+      font-size: 18px;
     }
-    select, button {
+    #trade-log {
+      max-height: 150px;
+      overflow-y: scroll;
+      background-color: #222;
+      padding: 5px;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+    button, select {
       font-size: 16px;
+      margin-right: 10px;
     }
   </style>
 </head>
 <body>
-  <h1>股票走势模拟 (K线模式)</h1>
+  <h1>股票走势模拟（多级别K线+交互交易）</h1>
   <div id="controls">
     <label for="mode-select">选择股价走势模式：</label>
     <select id="mode-select">
@@ -36,182 +51,301 @@
       <option value="3">主升浪</option>
       <option value="4">混合模式</option>
     </select>
-    <div class="checkbox-group">
-      <label>选择均线：</label>
-      <input type="checkbox" id="ma13" checked> MA13
-      <input type="checkbox" id="ma21" checked> MA21
-      <input type="checkbox" id="ema40" checked> EMA40
-      <input type="checkbox" id="ema60" checked> EMA60
-    </div>
-    <button id="reset-btn">重置模拟</button>
+    <button id="pause-btn">Pause</button>
+    <button id="reset-btn">Reset Simulation</button>
   </div>
-  <div id="chart"></div>
+  <div id="funds-display">资金: $100000.00，持仓: 0</div>
+  <div id="trade-log"></div>
+  
+  <div id="charts">
+    <div id="chart-daily" class="chart-container"></div>
+    <div id="chart-weekly" class="chart-container"></div>
+    <div id="chart-monthly" class="chart-container"></div>
+  </div>
   
   <script>
-    // 初始数据：第一天K线数据，开盘、最高、最低、收盘均为100
-    let candles = [{ open: 100, high: 100, low: 100, close: 100 }];
-    let xData = [0];
-
+    // 全局变量
+    var simulationPaused = false;
+    var simulationInterval = null;
+    var dailyCandles = [];
+    var xDataDaily = [];
+    var tradeLog = [];
+    var funds = 100000;
+    var position = 0;
+    
+    // 初始化第一天数据：开盘、最高、最低、收盘均为 100
+    dailyCandles.push({ open: 100, high: 100, low: 100, close: 100 });
+    xDataDaily.push(0);
+    
     // 根据模式生成下一天的K线数据
     function simulateNextCandle(lastClose, mode) {
       let dailyReturn = 0;
-      if (mode === 1) { // 均线震荡：波动较小
-          dailyReturn = Math.random() * 0.06 - 0.03; // -3% ~ +3%
-      } else if (mode === 2) { // 剧烈震荡：波动较大
-          dailyReturn = Math.random() * 0.2 - 0.1;   // -10% ~ +10%
-      } else if (mode === 3) { // 主升浪：整体正向趋势
-          dailyReturn = 0.02 + (Math.random() * 0.06 - 0.03);
-      } else if (mode === 4) { // 混合模式：随机选择上述三种之一
-          let rnd = Math.random();
-          if (rnd < 0.3) {
-              dailyReturn = Math.random() * 0.06 - 0.03;
-          } else if (rnd < 0.6) {
-              dailyReturn = Math.random() * 0.2 - 0.1;
-          } else {
-              dailyReturn = 0.02 + (Math.random() * 0.06 - 0.03);
-          }
+      mode = parseInt(mode);
+      if (mode === 1) {
+        dailyReturn = Math.random() * 0.06 - 0.03; // -3% ~ +3%
+      } else if (mode === 2) {
+        dailyReturn = Math.random() * 0.2 - 0.1;   // -10% ~ +10%
+      } else if (mode === 3) {
+        dailyReturn = 0.02 + (Math.random() * 0.06 - 0.03);
+      } else if (mode === 4) {
+        let rnd = Math.random();
+        if (rnd < 0.3) { dailyReturn = Math.random() * 0.06 - 0.03; }
+        else if (rnd < 0.6) { dailyReturn = Math.random() * 0.2 - 0.1; }
+        else { dailyReturn = 0.02 + (Math.random() * 0.06 - 0.03); }
       }
-      // 限制每日涨跌幅不超过 ±10%
       dailyReturn = Math.max(Math.min(dailyReturn, 0.1), -0.1);
       let open = lastClose;
       let close = open * (1 + dailyReturn);
-      // 模拟上影线和下影线：在最高价和最低价上加减最多2%
       let high = Math.max(open, close) * (1 + Math.random() * 0.02);
       let low = Math.min(open, close) * (1 - Math.random() * 0.02);
       return { open: open, high: high, low: low, close: close };
     }
-
-    // 计算简单移动平均 MA（基于收盘价）
-    function computeMA(data, window) {
-      let ma = [];
-      for (let i = 0; i < data.length; i++) {
-        if (i < window - 1) {
-          ma.push(null);
-        } else {
-          let sum = 0;
-          for (let j = i - window + 1; j <= i; j++) {
-            sum += data[j];
-          }
-          ma.push(sum / window);
-        }
-      }
-      return ma;
-    }
-
-    // 计算指数移动平均 EMA（基于收盘价）
-    function computeEMA(data, span) {
+    
+    // EMA 计算（数组版本）
+    function computeEMAArray(data, span) {
       let ema = [];
       let k = 2 / (span + 1);
       for (let i = 0; i < data.length; i++) {
-        if (i === 0) {
-          ema.push(data[0]);
-        } else {
-          ema.push(data[i] * k + ema[i - 1] * (1 - k));
-        }
+        if (i === 0) ema.push(data[0]);
+        else ema.push(data[i] * k + ema[i - 1] * (1 - k));
       }
       return ema;
     }
-
-    // 绘制图表
-    function drawChart() {
-      // 提取所有K线的收盘价用于均线计算
-      let closePrices = candles.map(c => c.close);
-      let ma13 = computeMA(closePrices, 13);
-      let ma21 = computeMA(closePrices, 21);
-      let ema40 = computeEMA(closePrices, 40);
-      let ema60 = computeEMA(closePrices, 60);
-
-      // 判断用户选择显示哪些均线
-      let showMA13 = document.getElementById("ma13").checked;
-      let showMA21 = document.getElementById("ma21").checked;
-      let showEMA40 = document.getElementById("ema40").checked;
-      let showEMA60 = document.getElementById("ema60").checked;
-
-      // 构造K线图数据（candlestick）
-      let candlestick = {
-          x: xData,
-          open: candles.map(c => c.open),
-          high: candles.map(c => c.high),
-          low: candles.map(c => c.low),
-          close: candles.map(c => c.close),
-          type: 'candlestick',
-          name: 'K线',
-          increasing: { line: { color: 'red' } },  // 上涨：红色
-          decreasing: { line: { color: 'green' } }  // 下跌：绿色
+    // 计算 MACD，使用参数 fast=12, slow=26, signal=9
+    function computeMACD(data, fast = 12, slow = 26, signal = 9) {
+      let emaFast = computeEMAArray(data, fast);
+      let emaSlow = computeEMAArray(data, slow);
+      let macdLine = data.map((d, i) => emaFast[i] - emaSlow[i]);
+      let signalLine = computeEMAArray(macdLine, signal);
+      let hist = macdLine.map((d, i) => d - signalLine[i]);
+      return { macdLine: macdLine, signalLine: signalLine, hist: hist };
+    }
+    
+    // 按 groupSize 对 dailyCandles 聚合，groupSize=5: 周K，groupSize=20: 月K
+    function aggregateCandles(candles, groupSize) {
+      let aggregated = [];
+      for (let i = 0; i < candles.length; i += groupSize) {
+        let group = candles.slice(i, i + groupSize);
+        if (group.length > 0) {
+          let open = group[0].open;
+          let close = group[group.length - 1].close;
+          let high = Math.max(...group.map(c => c.high));
+          let low = Math.min(...group.map(c => c.low));
+          aggregated.push({ open: open, high: high, low: low, close: close });
+        }
+      }
+      return aggregated;
+    }
+    
+    // 绘制日级别K线图（含买卖标记）
+    function drawDailyChart() {
+      let traceCandlestick = {
+        x: xDataDaily,
+        open: dailyCandles.map(c => c.open),
+        high: dailyCandles.map(c => c.high),
+        low: dailyCandles.map(c => c.low),
+        close: dailyCandles.map(c => c.close),
+        type: 'candlestick',
+        name: '日K',
+        increasing: { line: { color: 'red' } },
+        decreasing: { line: { color: 'green' } }
       };
-
-      let traces = [candlestick];
-
-      if (showMA13) {
-        traces.push({
-          x: xData,
-          y: ma13,
-          mode: 'lines',
-          name: 'MA13',
-          line: { color: 'yellow' }
-        });
-      }
-      if (showMA21) {
-        traces.push({
-          x: xData,
-          y: ma21,
-          mode: 'lines',
-          name: 'MA21',
-          line: { color: 'magenta' }
-        });
-      }
-      if (showEMA40) {
-        traces.push({
-          x: xData,
-          y: ema40,
-          mode: 'lines',
-          name: 'EMA40',
-          line: { color: 'green' }
-        });
-      }
-      if (showEMA60) {
-        traces.push({
-          x: xData,
-          y: ema60,
-          mode: 'lines',
-          name: 'EMA60',
-          line: { color: 'red' }
-        });
-      }
-
+      // 根据交易记录生成标记
+      let buyTrades = tradeLog.filter(t => t.type === "Buy");
+      let sellTrades = tradeLog.filter(t => t.type === "Sell");
+      let traceBuy = {
+        x: buyTrades.map(t => t.time),
+        y: buyTrades.map(t => t.price),
+        mode: 'markers',
+        name: '买入',
+        marker: { symbol: 'triangle-up', size: 10, color: 'blue' }
+      };
+      let traceSell = {
+        x: sellTrades.map(t => t.time),
+        y: sellTrades.map(t => t.price),
+        mode: 'markers',
+        name: '卖出',
+        marker: { symbol: 'triangle-down', size: 10, color: 'orange' }
+      };
+      
       let layout = {
-        title: '股票走势模拟 (K线模式)',
-        xaxis: { title: '时间（日）' },
-        yaxis: { title: '价格' },
-        width: 1000,
-        height: 600,
+        title: '日K及交易标记',
         paper_bgcolor: '#111111',
         plot_bgcolor: '#111111',
-        font: { color: 'white' }
+        font: { color: 'white' },
+        margin: { t: 40 }
       };
-
-      Plotly.react('chart', traces, layout);
+      let data = [traceCandlestick];
+      if (buyTrades.length > 0) data.push(traceBuy);
+      if (sellTrades.length > 0) data.push(traceSell);
+      Plotly.react('chart-daily', data, layout);
     }
-
-    // 初次绘制图表
-    drawChart();
-
-    // 每秒钟更新一次数据，模拟生成新一天的K线数据
-    setInterval(function() {
-      let mode = parseInt(document.getElementById("mode-select").value);
-      let lastCandle = candles[candles.length - 1];
-      let newCandle = simulateNextCandle(lastCandle.close, mode);
-      candles.push(newCandle);
-      xData.push(xData.length);
-      drawChart();
-    }, 1000);
-
-    // 重置模拟按钮
-    document.getElementById("reset-btn").addEventListener("click", function() {
-      candles = [{ open: 100, high: 100, low: 100, close: 100 }];
-      xData = [0];
-      drawChart();
+    
+    // 绘制聚合图（周或月）——同时显示K线与MACD，下部显示 MACD 指标
+    // containerId: 容器 div 的 id, groupSize: 每组天数, title: 图表标题
+    function drawAggregatedChart(containerId, groupSize, title) {
+      let aggregated = aggregateCandles(dailyCandles, groupSize);
+      let xAggregated = [];
+      for (let i = 0; i < aggregated.length; i++) { xAggregated.push(i); }
+      
+      let traceCandle = {
+        x: xAggregated,
+        open: aggregated.map(c => c.open),
+        high: aggregated.map(c => c.high),
+        low: aggregated.map(c => c.low),
+        close: aggregated.map(c => c.close),
+        type: 'candlestick',
+        name: title + ' K线',
+        increasing: { line: { color: 'red' } },
+        decreasing: { line: { color: 'green' } },
+        xaxis: 'x',
+        yaxis: 'y2'
+      };
+      
+      // MACD 基于聚合后的收盘价计算
+      let closeAgg = aggregated.map(c => c.close);
+      let macdResult = computeMACD(closeAgg);
+      let traceMACD = {
+        x: xAggregated,
+        y: macdResult.macdLine,
+        type: 'scatter',
+        mode: 'lines',
+        name: 'MACD',
+        xaxis: 'x',
+        yaxis: 'y'
+      };
+      let traceSignal = {
+        x: xAggregated,
+        y: macdResult.signalLine,
+        type: 'scatter',
+        mode: 'lines',
+        name: 'Signal',
+        xaxis: 'x',
+        yaxis: 'y'
+      };
+      let traceHist = {
+        x: xAggregated,
+        y: macdResult.hist,
+        type: 'bar',
+        name: 'Histogram',
+        marker: { color: 'gray' },
+        xaxis: 'x',
+        yaxis: 'y'
+      };
+      
+      // 布局：上部为K线，下部为MACD
+      let layout = {
+        title: title,
+        grid: { rows: 2, columns: 1, roworder: 'top to bottom' },
+        xaxis: { domain: [0, 1] },
+        yaxis: { domain: [0, 0.3], title: 'MACD', automargin: true },
+        yaxis2: { domain: [0.35, 1], title: '价格', automargin: true },
+        paper_bgcolor: '#111111',
+        plot_bgcolor: '#111111',
+        font: { color: 'white' },
+        margin: { t: 40 }
+      };
+      
+      let data = [traceHist, traceMACD, traceSignal, traceCandle];
+      Plotly.react(containerId, data, layout);
+    }
+    
+    // 更新资金显示
+    function updateFundsDisplay() {
+      document.getElementById("funds-display").innerHTML =
+        "资金: $" + funds.toFixed(2) + "，持仓: " + position;
+    }
+    
+    // 更新交易日志显示
+    function updateTradeLogDisplay() {
+      let logDiv = document.getElementById("trade-log");
+      logDiv.innerHTML = "";
+      // 最新的交易显示在最上面
+      for (let i = tradeLog.length - 1; i >= 0; i--) {
+        let t = tradeLog[i];
+        let line = document.createElement("div");
+        line.textContent = t.time + " - " + t.type + " @ $" + t.price.toFixed(2);
+        logDiv.appendChild(line);
+      }
+    }
+    
+    // 买入操作（仅在暂停时允许，交易一手）
+    function buyOperation() {
+      let currentPrice = dailyCandles[dailyCandles.length - 1].close;
+      if (funds >= currentPrice) {
+        funds -= currentPrice;
+        position += 1;
+        tradeLog.push({ type: "Buy", price: currentPrice, time: xDataDaily[xDataDaily.length - 1] });
+        updateFundsDisplay();
+        updateTradeLogDisplay();
+        drawDailyChart();
+      }
+    }
+    // 卖出操作（仅在暂停时允许，交易一手）
+    function sellOperation() {
+      let currentPrice = dailyCandles[dailyCandles.length - 1].close;
+      if (position > 0) {
+        funds += currentPrice;
+        position -= 1;
+        tradeLog.push({ type: "Sell", price: currentPrice, time: xDataDaily[xDataDaily.length - 1] });
+        updateFundsDisplay();
+        updateTradeLogDisplay();
+        drawDailyChart();
+      }
+    }
+    
+    // 监听键盘方向键事件（仅在暂停时触发交易）
+    document.addEventListener("keydown", function(e) {
+      if (simulationPaused) {
+        if (e.key === "ArrowUp") {
+          buyOperation();
+        } else if (e.key === "ArrowDown") {
+          sellOperation();
+        }
+      }
     });
+    
+    // 模拟更新：若未暂停，每秒生成一个新日K数据并更新所有图表
+    function updateSimulation() {
+      if (!simulationPaused) {
+        let mode = document.getElementById("mode-select").value;
+        let lastCandle = dailyCandles[dailyCandles.length - 1];
+        let newCandle = simulateNextCandle(lastCandle.close, mode);
+        dailyCandles.push(newCandle);
+        xDataDaily.push(xDataDaily.length);
+        drawDailyChart();
+        drawAggregatedChart("chart-weekly", 5, "周级别");
+        drawAggregatedChart("chart-monthly", 20, "月级别");
+      }
+    }
+    simulationInterval = setInterval(updateSimulation, 1000);
+    
+    // 暂停/恢复按钮：点击后切换模拟状态
+    document.getElementById("pause-btn").addEventListener("click", function() {
+      simulationPaused = !simulationPaused;
+      this.textContent = simulationPaused ? "Resume" : "Pause";
+    });
+    
+    // 重置按钮：清空数据、资金、交易日志，并重绘图表
+    document.getElementById("reset-btn").addEventListener("click", function() {
+      dailyCandles = [{ open: 100, high: 100, low: 100, close: 100 }];
+      xDataDaily = [0];
+      tradeLog = [];
+      funds = 100000;
+      position = 0;
+      updateFundsDisplay();
+      updateTradeLogDisplay();
+      drawDailyChart();
+      drawAggregatedChart("chart-weekly", 5, "周级别");
+      drawAggregatedChart("chart-monthly", 20, "月级别");
+    });
+    
+    // 初始绘图及资金显示
+    updateFundsDisplay();
+    drawDailyChart();
+    drawAggregatedChart("chart-weekly", 5, "周级别");
+    drawAggregatedChart("chart-monthly", 20, "月级别");
+    
   </script>
 </body>
 </html>
