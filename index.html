@@ -178,4 +178,263 @@
       let closePrices = candles.map(c => c.close);
       
       // 获取均线显示选择
-      let showMA13 = document
+      let showMA13 = document.getElementById("ma13").checked;
+      let showMA21 = document.getElementById("ma21").checked;
+      let showEMA40 = document.getElementById("ema40").checked;
+      let showEMA60 = document.getElementById("ema60").checked;
+      
+      let traces = [];
+      
+      // 主图：K线
+      let traceCandle = {
+        x: xData,
+        open: candles.map(c => c.open),
+        high: candles.map(c => c.high),
+        low: candles.map(c => c.low),
+        close: candles.map(c => c.close),
+        type: 'candlestick',
+        name: title + " K线",
+        increasing: { line: { color: 'red' } },
+        decreasing: { line: { color: 'green' } },
+        xaxis: 'x',
+        yaxis: 'y2'
+      };
+      traces.push(traceCandle);
+      
+      // 若为日级别，加入买卖标记
+      if(isDaily) {
+        let buyTrades = tradeLog.filter(t => t.type === "Buy");
+        let sellTrades = tradeLog.filter(t => t.type === "Sell");
+        let traceBuy = {
+          x: buyTrades.map(t => t.time),
+          y: buyTrades.map(t => t.price),
+          mode: 'markers',
+          name: '买入',
+          marker: { symbol: 'triangle-up', size: 10, color: 'blue' },
+          xaxis: 'x',
+          yaxis: 'y2'
+        };
+        let traceSell = {
+          x: sellTrades.map(t => t.time),
+          y: sellTrades.map(t => t.price),
+          mode: 'markers',
+          name: '卖出',
+          marker: { symbol: 'triangle-down', size: 10, color: 'orange' },
+          xaxis: 'x',
+          yaxis: 'y2'
+        };
+        if(buyTrades.length > 0) traces.push(traceBuy);
+        if(sellTrades.length > 0) traces.push(traceSell);
+      }
+      
+      // 根据均线选择添加均线曲线（均线均基于收盘价）
+      if(showMA13) {
+        let ma13 = computeMA(closePrices, 13);
+        traces.push({
+          x: xData,
+          y: ma13,
+          mode: 'lines',
+          name: 'MA13',
+          line: { color: 'yellow' },
+          xaxis: 'x',
+          yaxis: 'y2'
+        });
+      }
+      if(showMA21) {
+        let ma21 = computeMA(closePrices, 21);
+        traces.push({
+          x: xData,
+          y: ma21,
+          mode: 'lines',
+          name: 'MA21',
+          line: { color: 'magenta' },
+          xaxis: 'x',
+          yaxis: 'y2'
+        });
+      }
+      if(showEMA40) {
+        let ema40 = computeEMA(closePrices, 40);
+        traces.push({
+          x: xData,
+          y: ema40,
+          mode: 'lines',
+          name: 'EMA40',
+          line: { color: 'green' },
+          xaxis: 'x',
+          yaxis: 'y2'
+        });
+      }
+      if(showEMA60) {
+        let ema60 = computeEMA(closePrices, 60);
+        traces.push({
+          x: xData,
+          y: ema60,
+          mode: 'lines',
+          name: 'EMA60',
+          line: { color: 'red' },
+          xaxis: 'x',
+          yaxis: 'y2'
+        });
+      }
+      
+      // 副图：MACD
+      let macdResult = computeMACD(closePrices);
+      let traceMACD = {
+        x: xData,
+        y: macdResult.macdLine,
+        type: 'scatter',
+        mode: 'lines',
+        name: 'MACD',
+        xaxis: 'x',
+        yaxis: 'y'
+      };
+      let traceSignal = {
+        x: xData,
+        y: macdResult.signalLine,
+        type: 'scatter',
+        mode: 'lines',
+        name: 'Signal',
+        xaxis: 'x',
+        yaxis: 'y'
+      };
+      let traceHist = {
+        x: xData,
+        y: macdResult.hist,
+        type: 'bar',
+        name: 'Histogram',
+        marker: { color: 'gray' },
+        xaxis: 'x',
+        yaxis: 'y'
+      };
+      
+      traces.push(traceHist, traceMACD, traceSignal);
+      
+      let layout = {
+        title: title,
+        grid: { rows: 2, columns: 1, roworder: 'top to bottom' },
+        xaxis: { domain: [0, 1] },
+        yaxis: { domain: [0, 0.3], title: 'MACD' },
+        yaxis2: { domain: [0.35, 1], title: '价格' },
+        paper_bgcolor: '#111111',
+        plot_bgcolor: '#111111',
+        font: { color: 'white' },
+        margin: { t: 40 }
+      };
+      
+      Plotly.react(containerId, traces, layout);
+    }
+    
+    // 绘制日级别图表（主图+MACD，含买卖标记）
+    function drawDailyChart() {
+      drawCombinedChart('chart-daily', dailyCandles, xDataDaily, "日级别", true);
+    }
+    
+    // 绘制周、月级别图表（主图+MACD，不显示买卖标记）
+    function drawAggregatedChart(containerId, groupSize, title) {
+      let aggregated = aggregateCandles(dailyCandles, groupSize);
+      let xAggregated = [];
+      for (let i = 0; i < aggregated.length; i++) { xAggregated.push(i); }
+      drawCombinedChart(containerId, aggregated, xAggregated, title, false);
+    }
+    
+    // 更新资金和持仓显示
+    function updateFundsDisplay() {
+      document.getElementById("funds-display").innerHTML =
+        "资金: $" + funds.toFixed(2) + "，持仓: " + position;
+    }
+    
+    // 更新交易日志显示（只显示最近6条记录）
+    function updateTradeLogDisplay() {
+      let logDiv = document.getElementById("trade-log");
+      logDiv.innerHTML = "";
+      let recent = tradeLog.slice(-6);
+      for (let i = recent.length - 1; i >= 0; i--) {
+        let t = recent[i];
+        let line = document.createElement("div");
+        line.textContent = t.time + " - " + t.type + " @ $" + t.price.toFixed(2);
+        logDiv.appendChild(line);
+      }
+    }
+    
+    // 买入操作（以当前日K收盘价成交，1手）
+    function buyOperation() {
+      let currentPrice = dailyCandles[dailyCandles.length - 1].close;
+      if (funds >= currentPrice) {
+        funds -= currentPrice;
+        position += 1;
+        tradeLog.push({ type: "Buy", price: currentPrice, time: xDataDaily[xDataDaily.length - 1] });
+        updateFundsDisplay();
+        updateTradeLogDisplay();
+        drawDailyChart();
+      }
+    }
+    
+    // 卖出操作（以当前日K收盘价成交，1手）
+    function sellOperation() {
+      let currentPrice = dailyCandles[dailyCandles.length - 1].close;
+      if (position > 0) {
+        funds += currentPrice;
+        position -= 1;
+        tradeLog.push({ type: "Sell", price: currentPrice, time: xDataDaily[xDataDaily.length - 1] });
+        updateFundsDisplay();
+        updateTradeLogDisplay();
+        drawDailyChart();
+      }
+    }
+    
+    // 键盘事件：立即响应买入（↑）、卖出（↓）以及空格键暂停/恢复
+    document.addEventListener("keydown", function(e) {
+      if (e.key === "ArrowUp") {
+        buyOperation();
+      } else if (e.key === "ArrowDown") {
+        sellOperation();
+      } else if (e.key === " " || e.code === "Space") {
+        simulationPaused = !simulationPaused;
+        document.getElementById("pause-btn").textContent = simulationPaused ? "Resume" : "Pause";
+      }
+    });
+    
+    // 模拟更新：若未暂停，每秒生成新日K数据并更新所有图表
+    function updateSimulation() {
+      if (!simulationPaused) {
+        let mode = document.getElementById("mode-select").value;
+        let lastCandle = dailyCandles[dailyCandles.length - 1];
+        let newCandle = simulateNextCandle(lastCandle.close, mode);
+        dailyCandles.push(newCandle);
+        xDataDaily.push(xDataDaily.length);
+        drawDailyChart();
+        drawAggregatedChart("chart-weekly", 5, "周级别");
+        drawAggregatedChart("chart-monthly", 20, "月级别");
+      }
+    }
+    simulationInterval = setInterval(updateSimulation, 1000);
+    
+    // 暂停/恢复按钮点击事件
+    document.getElementById("pause-btn").addEventListener("click", function() {
+      simulationPaused = !simulationPaused;
+      this.textContent = simulationPaused ? "Resume" : "Pause";
+    });
+    
+    // 重置按钮：重置所有数据、资金、交易日志，并重绘图表
+    document.getElementById("reset-btn").addEventListener("click", function() {
+      dailyCandles = [{ open: 100, high: 100, low: 100, close: 100 }];
+      xDataDaily = [0];
+      tradeLog = [];
+      funds = 100000;
+      position = 0;
+      updateFundsDisplay();
+      updateTradeLogDisplay();
+      drawDailyChart();
+      drawAggregatedChart("chart-weekly", 5, "周级别");
+      drawAggregatedChart("chart-monthly", 20, "月级别");
+    });
+    
+    // 初始绘图及资金显示
+    updateFundsDisplay();
+    drawDailyChart();
+    drawAggregatedChart("chart-weekly", 5, "周级别");
+    drawAggregatedChart("chart-monthly", 20, "月级别");
+    
+  </script>
+</body>
+</html>
